@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>YOLO Video Detection + Captioning</title>
+  <style>
+    :root {
+      --bg:#0f1724;--card:#0b1220;--muted:#9aa7bf;--accent:#7c3aed;
+      --glass:rgba(255,255,255,0.03);--green:#10b981;--danger:#ef4444;
+      font-family:Inter,system-ui,sans-serif;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;background:linear-gradient(180deg,#071025 0%, #0b1630 100%);
+      color:#e6eef8;display:flex;align-items:center;justify-content:center;padding:24px;}
+    .wrap{width:100%;max-width:980px;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));
+      border-radius:16px;padding:22px;box-shadow:0 8px 30px rgba(2,6,23,0.7);border:1px solid rgba(255,255,255,0.03);}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+    .title{display:flex;gap:12px;align-items:center;}
+    .logo{width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#3b82f6);
+      display:flex;align-items:center;justify-content:center;font-weight:700;font-size:20px;color:white;
+      box-shadow:0 6px 18px rgba(124,58,237,0.18);}
+    h1{margin:0;font-size:18px}
+    p.lead{margin:0;color:var(--muted);font-size:13px}
+    .grid{display:grid;grid-template-columns:340px 1fr;gap:18px;margin-top:16px;}
+    .card{background:var(--card);padding:16px;border-radius:12px;border:1px solid var(--glass);}
+    .uploader{display:flex;flex-direction:column;gap:12px;}
+    video{width:100%;border-radius:8px;background:rgba(255,255,255,0.02);}
+    .controls{display:flex;gap:8px;align-items:center}
+    .btn{background:linear-gradient(180deg,var(--accent),#4f46e5);color:white;padding:10px 12px;
+      border-radius:10px;border:0;cursor:pointer;font-weight:600;box-shadow:0 6px 18px rgba(79,70,229,0.12);}
+    .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.08);color:var(--muted)}
+    input[type="file"]{display:none}
+    .small{font-size:13px;color:var(--muted)}
+    .progress{height:12px;border-radius:8px;background:rgba(255,255,255,0.05);overflow:hidden}
+    .progress>i{display:block;height:100%;width:0%;background:linear-gradient(90deg,#34d399,#60a5fa);transition:width .4s linear}
+    .status{font-size:13px;color:var(--muted);margin-top:6px}
+    canvas{border-radius:8px;border:1px solid rgba(255,255,255,0.05);background:#071022;max-width:100%}
+    .results{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+    .chip{background:rgba(255,255,255,0.03);padding:8px 10px;border-radius:999px;font-weight:600;font-size:13px}
+    .caption{margin-top:8px;padding:12px;border-radius:10px;
+      background:linear-gradient(180deg,rgba(124,58,237,0.06),rgba(255,255,255,0.02));
+      border:1px solid rgba(124,58,237,0.06);color:#dfe9ff;font-size:15px;}
+    footer{margin-top:12px;font-size:13px;color:var(--muted);display:flex;justify-content:space-between;align-items:center}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <div style="text-align:left; margin-bottom:20px;">
+    <a href="/" style="display:inline-block;padding:10px 16px;background:linear-gradient(180deg,#7c3aed,#4f46e5);
+       color:white;border-radius:8px;font-weight:600;text-decoration:none;transition:0.3s;">← Back to Home</a>
+  </div>
+
+  <header>
+    <div class="title">
+      <div class="logo">YOLO</div>
+      <div>
+        <h1>YOLO Video Detection + Captioning</h1>
+        <p class="lead">Upload a video to detect objects and generate captions.</p>
+      </div>
+    </div>
+  </header>
+
+  <section class="grid">
+    <div class="card">
+      <div class="uploader">
+        <strong>Welcome!</strong>
+        <div class="small">Upload a video to begin detection.</div>
+
+        <video id="previewVideo" controls></video>
+
+        <div class="controls">
+          <input id="videoInput" type="file" accept="video/*" />
+          <label for="videoInput" class="btn ghost">Choose Video</label>
+          <button id="streamBtn" class="btn" disabled>Stream Detection</button>
+          <button id="resetBtn" class="btn ghost">Reset</button>
+        </div>
+
+        <div>
+          <div class="small">Processing progress</div>
+          <div class="progress"><i id="progressBar"></i></div>
+          <div class="status" id="statusText">Waiting for video...</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <canvas id="mainCanvas" width="800" height="450"></canvas>
+      <div class="results">
+        <div class="chip" id="numObjects">Objects: 0</div>
+        <div class="chip" id="confidenceAvg">Avg Conf: —</div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button id="ttsBtn" class="btn" disabled>Hear Caption</button>
+        </div>
+      </div>
+      <div class="caption" id="captionArea">Caption will appear here.</div>
+
+      <footer>
+        <div>Made by <strong>Sonal Raikar</strong>, <strong>Siddhali Kathar</strong> & <strong>Chaitali Bhamre</strong></div>
+      </footer>
+    </div>
+  </section>
+</main>
+
+<script>
+const videoInput = document.getElementById('videoInput');
+const previewVideo = document.getElementById('previewVideo');
+const streamBtn = document.getElementById('streamBtn');
+const resetBtn = document.getElementById('resetBtn');
+const progressBar = document.getElementById('progressBar');
+const statusText = document.getElementById('statusText');
+const canvas = document.getElementById('mainCanvas');
+const ctx = canvas.getContext('2d');
+const captionArea = document.getElementById('captionArea');
+const numObjects = document.getElementById('numObjects');
+const confidenceAvg = document.getElementById('confidenceAvg');
+const ttsBtn = document.getElementById('ttsBtn');
+
+let streamImg = new Image();
+let streaming = false;
+let videoPath = '';
+
+videoInput.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    previewVideo.src = URL.createObjectURL(file);
+    streamBtn.disabled = false;
+    statusText.textContent = 'Video ready.';
+});
+
+resetBtn.addEventListener('click', () => {
+    videoInput.value = '';
+    previewVideo.src = '';
+    streamBtn.disabled = true;
+    ttsBtn.disabled = true;
+    captionArea.textContent = 'Caption will appear here.';
+    numObjects.textContent = 'Objects: 0';
+    confidenceAvg.textContent = 'Avg Conf: —';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    statusText.textContent = 'Waiting for video...';
+    streaming = false;
+    streamImg.src = '';
+  if (captionPollId) { clearInterval(captionPollId); captionPollId = null; }
+});
+
+streamBtn.addEventListener('click', async () => {
+    const file = videoInput.files[0];
+    if (!file) return;
+
+    statusText.textContent = 'Uploading video...';
+    progressBar.style.width = '30%';
+
+    // Step 1: Upload video
+    const formData = new FormData();
+    formData.append('video', file);
+
+    try {
+        const res = await fetch('/api/upload-video', { method: 'POST', body: formData });
+  const data = await res.json();
+  videoPath = data.video_path; // saved filename returned by server
+
+        statusText.textContent = 'Streaming video with detection...';
+        progressBar.style.width = '50%';
+        streaming = true;
+
+        // Step 2: Start MJPEG stream via GET
+  streamImg.src = `/api/video-stream?video_path=${encodeURIComponent(videoPath)}`;
+        streamImg.onload = function draw() {
+            if (!streaming) return;
+            ctx.drawImage(streamImg, 0, 0, canvas.width, canvas.height);
+            requestAnimationFrame(draw);
+        };
+
+    progressBar.style.width = '100%';
+    ttsBtn.disabled = false;
+
+    // Start polling for caption updates
+    startCaptionPolling(videoPath);
+    } catch (err) {
+        console.error(err);
+        statusText.textContent = 'Error uploading or streaming video.';
+    }
+});
+
+let captionPollId = null;
+function startCaptionPolling(savedName) {
+  if (captionPollId) clearInterval(captionPollId);
+  captionPollId = setInterval(async () => {
+    try {
+      const r = await fetch(`/api/video-caption?video_path=${encodeURIComponent(savedName)}`);
+      const j = await r.json();
+      if (j.status === 'ready') {
+        captionArea.textContent = j.caption || 'No objects detected.';
+        numObjects.textContent = 'Objects: ' + (j.labels ? j.labels.length : 0);
+        ttsBtn.disabled = false;
+        // stop polling when ready
+        clearInterval(captionPollId);
+        captionPollId = null;
+      } else {
+        captionArea.textContent = 'Processing...';
+      }
+    } catch (e) {
+      console.warn('Caption poll failed', e);
+    }
+  }, 1000);
+}
+
+ttsBtn.addEventListener('click', () => {
+    const caption = captionArea.textContent;
+    if(!caption) return;
+    const u = new SpeechSynthesisUtterance(caption);
+    u.lang = 'en-US';
+    window.speechSynthesis.speak(u);
+});
+
+</script>
+</body>
+</html>

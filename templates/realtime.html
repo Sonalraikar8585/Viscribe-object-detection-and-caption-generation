@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>YOLO Real-time Detection + Captioning</title>
+  <style>
+    :root {
+      --bg:#0f1724;--card:#0b1220;--muted:#9aa7bf;--accent:#7c3aed;
+      --glass:rgba(255,255,255,0.03);--green:#10b981;--danger:#ef4444;
+      font-family:Inter,system-ui,sans-serif;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;background:linear-gradient(180deg,#071025 0%, #0b1630 100%);
+      color:#e6eef8;display:flex;align-items:center;justify-content:center;padding:24px;}
+    .wrap{width:100%;max-width:980px;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));
+      border-radius:16px;padding:22px;box-shadow:0 8px 30px rgba(2,6,23,0.7);border:1px solid rgba(255,255,255,0.03);}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+    .title{display:flex;gap:12px;align-items:center;}
+    .logo{width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#3b82f6);
+      display:flex;align-items:center;justify-content:center;font-weight:700;font-size:20px;color:white;
+      box-shadow:0 6px 18px rgba(124,58,237,0.18);}
+    h1{margin:0;font-size:18px}
+    p.lead{margin:0;color:var(--muted);font-size:13px}
+    .card{background:var(--card);padding:16px;border-radius:12px;border:1px solid var(--glass);}
+    video,canvas{width:100%;border-radius:8px;background:#071022;}
+    .controls{display:flex;gap:8px;align-items:center;margin-top:12px;}
+    .btn{background:linear-gradient(180deg,var(--accent),#4f46e5);color:white;padding:10px 12px;
+      border-radius:10px;border:0;cursor:pointer;font-weight:600;box-shadow:0 6px 18px rgba(79,70,229,0.12);}
+    .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.08);color:var(--muted)}
+    .caption{margin-top:8px;padding:12px;border-radius:10px;background:linear-gradient(180deg,rgba(124,58,237,0.06),rgba(255,255,255,0.02));
+      border:1px solid rgba(124,58,237,0.06);color:#dfe9ff;font-size:15px;}
+    footer{margin-top:12px;font-size:13px;color:var(--muted);display:flex;justify-content:space-between;align-items:center}
+  </style>
+</head>
+
+<body>
+  <main class="wrap">
+    <!-- Back to Home Button -->
+<div style="text-align:left; margin-bottom:20px;">
+  <a href="/" style="
+      display:inline-block;
+      padding:10px 16px;
+      background:linear-gradient(180deg,#7c3aed,#4f46e5);
+      color:white;
+      border-radius:8px;
+      font-weight:600;
+      text-decoration:none;
+      transition:0.3s;">
+    ← Back to Home
+  </a>
+</div>
+
+    <header>
+      <div class="title">
+        <div class="logo">YOLO</div>
+        <div>
+          <h1>YOLO Real-time Detection + Captioning</h1>
+          <p class="lead">Use your webcam for real-time object detection and captioning.</p>
+        </div>
+      </div>
+    </header>
+
+    <div class="card">
+      <video id="liveVideo" autoplay playsinline muted></video>
+      <canvas id="overlayCanvas"></canvas>
+
+      <div class="controls">
+        <button id="startBtn" class="btn">Start Camera</button>
+        <button id="stopBtn" class="btn ghost" disabled>Stop Camera</button>
+        <button id="ttsBtn" class="btn ghost" disabled>Hear Caption</button>
+      </div>
+
+      <div class="caption" id="captionArea">Caption will appear here.</div>
+
+      <footer>
+        <div>Made by <strong>Sonal Raikar</strong>, <strong>Siddhali Kathar</strong> & <strong>Chaitali Bhamre</strong></div>
+      </footer>
+    </div>
+  </main>
+
+  <script>
+    const video=document.getElementById('liveVideo');
+    const canvas=document.getElementById('overlayCanvas');
+    const ctx=canvas.getContext('2d');
+    const startBtn=document.getElementById('startBtn');
+    const stopBtn=document.getElementById('stopBtn');
+    const captionArea=document.getElementById('captionArea');
+    const ttsBtn=document.getElementById('ttsBtn');
+
+    let stream=null,interval=null,currentCaption="";
+
+    async function startCamera(){
+      stream=await navigator.mediaDevices.getUserMedia({video:true});
+      video.srcObject=stream;
+      canvas.width=video.clientWidth;
+      canvas.height=video.clientHeight;
+      startBtn.disabled=true;
+      stopBtn.disabled=false;
+      detectLoop();
+    }
+
+    async function detectLoop(){
+  const tmp=document.createElement('canvas');
+  const tctx=tmp.getContext('2d');
+  tmp.width = (video.videoWidth && video.videoWidth > 0) ? video.videoWidth : 640;
+  tmp.height = (video.videoHeight && video.videoHeight > 0) ? video.videoHeight : 480;
+
+      interval=setInterval(async()=>{
+        if(video.readyState<2)return;
+        tctx.drawImage(video,0,0,tmp.width,tmp.height);
+        tmp.toBlob(async(blob)=>{
+          console.log('toBlob produced', blob);
+          if (!blob || (window.Blob && !(blob instanceof Blob))) {
+            console.warn('toBlob did not produce a valid Blob, skipping frame');
+            return;
+          }
+          if (blob.size === 0) {
+            console.warn('toBlob produced empty blob, skipping frame');
+            return;
+          }
+          async function sendBlob(b) {
+            const fd = new FormData();
+            fd.append('frame', b, 'frame.jpg');
+            // Prefer endpoint that returns annotated frame for display
+            const res = await fetch('/api/realtime-frame', {method:'POST', body: fd});
+            if (!res.ok) {
+              const text = await res.text();
+              console.error('Server returned non-OK response', res.status, text);
+              return { error: `Server ${res.status}: ${text}` };
+            }
+            // Try to parse JSON safely
+            const ct = res.headers.get('content-type') || '';
+            if (ct.indexOf('application/json') === -1) {
+              const text = await res.text();
+              try {
+                return JSON.parse(text);
+              } catch (e) {
+                console.error('Unexpected non-JSON response from server', text);
+                return { error: 'Unexpected response from server' };
+              }
+            }
+            const result = await res.json();
+            return result;
+          }
+
+          let result;
+          if (blob && (window.Blob && blob instanceof Blob)) {
+            result = await sendBlob(blob);
+          } else {
+            // Fallback: convert dataURL to blob then send
+            try {
+              const dataUrl = tmp.toDataURL('image/jpeg', 0.8);
+              const r = await fetch(dataUrl);
+              const b = await r.blob();
+              result = await sendBlob(b);
+            } catch (e) {
+              console.error('Failed to produce blob from canvas', e);
+              return;
+            }
+          }
+          console.log('realtime result', result);
+          // show detection count for debugging
+          if (result.count !== undefined) {
+            captionArea.textContent = (result.caption || '') + ' — Objects: ' + result.count;
+          }
+          if (result.annotated) {
+            // draw annotated image onto canvas
+            const img = new Image();
+            img.onload = () => {
+              // resize canvas to video size
+              canvas.width = img.width;
+              canvas.height = img.height;
+              ctx.clearRect(0,0,canvas.width,canvas.height);
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            };
+            img.src = result.annotated;
+          } else if (result.boxes) {
+            drawBoxes(result.boxes);
+          }
+          // set caption text and currentCaption for TTS
+          captionArea.textContent = result.caption || captionArea.textContent;
+          currentCaption = result.caption || currentCaption;
+          ttsBtn.disabled = false;
+        }, 'image/jpeg');
+      },1000);
+    }
+
+    function drawBoxes(boxes){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.lineWidth=2;
+      ctx.strokeStyle='#7c3aed';
+      boxes.forEach(b=>{
+        const x=b.x*canvas.width, y=b.y*canvas.height, w=b.w*canvas.width, h=b.h*canvas.height;
+        ctx.strokeRect(x,y,w,h);
+        ctx.fillStyle='rgba(124,58,237,0.3)';
+        ctx.fillText(b.label,x+5,y+15);
+      });
+    }
+
+    stopBtn.addEventListener('click',()=>{
+      if(stream){stream.getTracks().forEach(t=>t.stop());}
+      clearInterval(interval);
+      startBtn.disabled=false;
+      stopBtn.disabled=true;
+      captionArea.textContent='Camera stopped.';
+    });
+
+    ttsBtn.addEventListener('click',()=>{
+      const u=new SpeechSynthesisUtterance(currentCaption);
+      u.lang='en-US';
+      window.speechSynthesis.speak(u);
+    });
+
+    startBtn.addEventListener('click',startCamera);
+  </script>
+</body>
+</html>
